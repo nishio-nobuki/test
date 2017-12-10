@@ -10,12 +10,11 @@ import numpy as np
 
 
 class Grid_World():
-    def __init__(self, space_n, world, start, goal):
+    def __init__(self, world, start, goal, reward):
         self.start = start
-        self.space_n = space_n
-        self.world = np.pad(world, ((1, 1), (1, 1)), "constant", constant_values=1)
+        self.world = world
         self.goal = goal
-        self.reward = 0
+        self.reward = reward
         self.done = False
         self.state = start
 
@@ -36,18 +35,22 @@ class Grid_World():
         else:
             print("state has vanished!!")
         if self.world[next_state[0], next_state[1]] == 1:
-            self.reward = -2.0
-            return self.state, self.reward, self.done
-        elif next_state == self.goal:
-            self.reward = 2.0
+            reward = self.reward[1]
+            return self.state, reward, self.done
+        elif next_state == self.goal[0]:
+            reward = self.reward[2]
             self.done = True
-            return next_state, self.reward, self.done
+            return next_state, reward, self.done
+        elif next_state == self.goal[1]:
+            reward = self.reward[3]
+            self.done = True
+            return next_state, reward, self.done
         else:
-            self.reward = -0.1
-            return next_state, self.reward, self.done
+            reward = self.reward[0]
+            return next_state, reward, self.done
 
     def reset(self):
         self.state = self.start
-        self.reward = 0
+        reward = 0
         self.done = False
-        return self.state, self.reward, self.done
+        return self.state, reward, self.done
