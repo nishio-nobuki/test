@@ -19,32 +19,30 @@ class Memory:
     def len(self):
         return len(self.buffer)
 
+    def max(self):
+        return max(self.buffer)
+
+    def clear(self):
+        self.buffer.clear()
+
+    def assign(self,i,num):
+        self.buffer[i] = num
 
 # [※p3] Memoryクラスを継承した、TD誤差を格納するクラスです
-class Memory_tderror(Memory):
+class MemoryTDerror(Memory):
     def __init__(self, max_size=1000):
         super().__init__(max_size)
 
     # add, sample, len は継承されているので定義不要
 
-    # TD誤差を取得
-    def get_TDerror(self, memory, gamma, mainQN, targetQN):
-        (state, action, reward, next_state) = memory.buffer[memory.len() - 1]   #最新の状態データを取り出す
-        # 価値計算（DDQNにも対応できるように、行動決定のQネットワークと価値観数のQネットワークは分離）
-        next_action = np.argmax(mainQN.model.predict(next_state)[0])  # 最大の報酬を返す行動を選択する
-        target = reward + gamma * targetQN.model.predict(next_state)[0][next_action]
-        TDerror = target - targetQN.model.predict(state)[0][action]
-        return TDerror
-
     # TD誤差をすべて更新
     def update_TDerror(self, memory, gamma, mainQN, targetQN):
         for i in range(0, (self.len() - 1)):
-            (state, action, reward, next_state) = memory.buffer[i]  # 最新の状態データを取り出す
+            (state, action, reward, next_state, _) = memory.buffer[i]  # 最新の状態データを取り出す
             # 価値計算（DDQNにも対応できるように、行動決定のQネットワークと価値観数のQネットワークは分離）
-            next_action = np.argmax(mainQN.model.predict(next_state)[0])  # 最大の報酬を返す行動を選択する
-            target = reward + gamma * targetQN.model.predict(next_state)[0][next_action]
-            TDerror = target - targetQN.model.predict(state)[0][action]
-            self.buffer[i] = TDerror
+            next_action_q = np.argmax(mainQN[next_state[0], next_state[1], :])  # 最大の報酬を返す行動を選択する
+            td = reward + gamma * next_action_q - targetQN[state[0], state[1], action]
+            self.buffer[i] = td
 
     # TD誤差の絶対値和を取得
     def get_sum_absolute_TDerror(self):
