@@ -10,12 +10,13 @@ import numpy as np
 import random
 
 class Grid_World():
-    def __init__(self, world, goal, reward):
+    def __init__(self, world, goal, reward, shapexy):
         self.world = world
         self.goal = np.array(goal)
         self.reward = reward
         self.done = False
         self.state = np.array([0, 0])
+        self.shapexy = shapexy
 
     def action2state(self, action, state):
         if action == 0:
@@ -40,16 +41,20 @@ class Grid_World():
         next_state = self.action2state(action,self.state)
 
         #random movement
-        if random.random() < 0.2:
+        if random.random() < 0:
             tmp = self.action2state(random.randint(0, 3), next_state)
-            if not(-1 in tmp or 30 in tmp):
+            if not(-1 in tmp or self.shapexy in tmp):
                 next_state = tmp
 
-
+        reward = 0
         if self.world[next_state[0], next_state[1]] == 1:
-            reward = self.reward[1]
+            reward = reward + self.reward[1]
+            if all(self.state == self.goal[0]):
+                reward = reward + self.reward[2]
+            if all(self.state == self.goal[1]):
+                reward = reward + self.reward[3]
             return self.state, reward, self.done
-        elif all(next_state == self.goal[0]):
+        if all(next_state == self.goal[0]):
             reward = self.reward[2]
             self.done = True
             return next_state, reward, self.done
@@ -64,8 +69,8 @@ class Grid_World():
 
     def reset_env(self):
         while 1:
-            x = random.randint(0, 29)
-            y = random.randint(0, 29)
+            x = random.randint(0, self.shapexy-1)
+            y = random.randint(0, self.shapexy-1)
             if self.world[x, y] == 1:
                 continue
             else:
