@@ -75,20 +75,24 @@ class Q_Learning():
              [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
              [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
              ])
-        self.goal = [[1, 1], [1, 1]]
+        self.goal = [[1, 1], [12, 12]]
         self.shapexy = 15
         self.gamma = 0.9
         self.alpha = 0.1
-        self.per_alpha = 0.8
-        self.reward_def = [-10, -100, 100, 100]  # 何もない時、壁に当たった時、ゴール1、ゴール2
+        self.per_alpha = 0.5
+        self.reward_def = [-10, -100, 100, 10]  # 何もない時、壁に当たった時、ゴール1、ゴール2
         self.num_episodes = 500
-        self.num_ex = 1
+        self.num_ex = 10
         self.eps_start = 0.1
         self.eps = self.eps_start + 0.01
         self.tau = 2.0
         self.batch_size = 10
         self.batch_size_per = 25
         self.memory_size = 1000
+        self.beta_start = 1.0
+        self.beta = self.beta_start
+        self.atb_p = 0
+        self.atb_len = 1.0
         if self.mode == 3:
             self.memory_size_b = 250
             self.memory_size_t = 50
@@ -133,6 +137,16 @@ class Q_Learning():
 
     def anneal_epsilon(self):
         self.eps = self.eps - self.eps_start/self.num_episodes
+
+    def anneal_beta(self):
+        self.beta = self.beta + (1 - self.beta_start)/self.num_episodes
+
+    def atb_weight(self,td_error):
+        return (1.0 / (((abs(td_error+0.0001)**self.alpha)/self.memory_td.get_sum_absolute_TDerror()) * self.memory_b.len() + 1)) ** self.beta
+
+    def anneal_atb_len(self,max_TDerror):
+        self.atb_p = self.atb_p + (1 / self.num_episodes)
+        self.atb_len = max_TDerror ** self.atb_p
 
     def store_er(self, t_seq):
         # store in memory b
@@ -245,12 +259,12 @@ class Q_Learning():
             idx_memory.add(idx)
         self.goal_num = self.goal_num + batch_memory.len()
         # あとはこのバッチで学習する
-        for i, (state_b, action_b, reward_b, next_state_b, _, _) in enumerate(batch_memory.buffer):
+        for i, (state_b, action_b, reward_b, next_state_b, td_error, _) in enumerate(batch_memory.buffer):
             # 価値計算（DDQNにも対応できるように、行動決定のQネットワークと価値観数のQネットワークは分離）
             next_action_q = np.max(self.q_func[next_state_b[0], next_state_b[1], :])  # 最大の報酬を返す行動を選択する
             td = reward_b + self.gamma * next_action_q - self.q_func_t[state_b[0], state_b[1], action_b]
-            self.q_func_t[state_b[0], state_b[1], action_b] = self.q_func_t[
-                                                                  state_b[0], state_b[1], action_b] + self.alpha * td
+            self.q_func_t[state_b[0], state_b[1], action_b] = self.q_func_t[state_b[0], state_b[1], action_b] \
+                                                              + self.alpha * td
             self.memory_td.assign(idx_memory.buffer[i], td)
         batch_memory.clear()
         idx_memory.clear()
@@ -431,12 +445,54 @@ class Q_Learning():
                     break
         self.goal_num = self.goal_num + batch_memory.len()
         # あとはこのバッチで学習する
-        for i, (state_b, action_b, reward_b, next_state_b, _, _) in enumerate(batch_memory.buffer):
+        for i, (state_b, action_b, reward_b, next_state_b, td_error, _) in enumerate(batch_memory.buffer):
             # 価値計算（DDQNにも対応できるように、行動決定のQネットワークと価値観数のQネットワークは分離）
             next_action_q = np.max(self.q_func[next_state_b[0], next_state_b[1], :])  # 最大の報酬を返す行動を選択する
             td = reward_b + self.gamma * next_action_q - self.q_func_t[state_b[0], state_b[1], action_b]
-            self.q_func_t[state_b[0], state_b[1], action_b] = self.q_func_t[
-                                                                  state_b[0], state_b[1], action_b] + self.alpha * td
+            self.q_func_t[state_b[0], state_b[1], action_b] = self.q_func_t[state_b[0], state_b[1], action_b] \
+                                                              + self.alpha * td
+            self.memory_td.assign(idx_memory.buffer[i], td)
+        batch_memory.clear()
+        idx_memory.clear()
+
+    def learning_proposed4(self):
+        # 0からTD誤差の絶対値和までの一様乱数を作成(昇順にしておく)
+        sum_absolute_TDerror = self.memory_td.get_sum_absolute_TDerror()
+        generatedrand_list = np.random.uniform(0, sum_absolute_TDerror, self.batch_size)
+        generatedrand_list = np.sort(generatedrand_list)
+
+        # [※p2]作成した乱数で串刺しにして、バッチを作成する
+        batch_memory = Memory(max_size=1000)
+        idx_memory = Memory(max_size=1000)
+        idx = 0
+        tmp_sum_absolute_TDerror = 0
+        for (i, randnum) in enumerate(generatedrand_list):
+            abstd = 0
+            while tmp_sum_absolute_TDerror < randnum:
+                abstd = self.memory_td.buffer[idx]
+                tmp_sum_absolute_TDerror += abs(abstd) ** self.per_alpha + 0.0001
+                idx += 1
+            id = idx
+
+            batch_memory.add(self.memory_b.buffer[id])
+            idx_memory.add(id)
+            while 1:
+                abstd -= 1.4
+                id -= 1
+                if abstd < 0 or id < 0:
+                    break
+                r = random.randint(0, self.memory_b.len() - 1)
+                batch_memory.add(self.memory_b.buffer[r])
+                idx_memory.add(r)
+
+        self.goal_num = self.goal_num + batch_memory.len()
+        # あとはこのバッチで学習する
+        for i, (state_b, action_b, reward_b, next_state_b, td_error, _) in enumerate(batch_memory.buffer):
+            # 価値計算（DDQNにも対応できるように、行動決定のQネットワークと価値観数のQネットワークは分離）
+            next_action_q = np.max(self.q_func[next_state_b[0], next_state_b[1], :])  # 最大の報酬を返す行動を選択する
+            td = reward_b + self.gamma * next_action_q - self.q_func_t[state_b[0], state_b[1], action_b]
+            self.q_func_t[state_b[0], state_b[1], action_b] = self.q_func_t[state_b[0], state_b[1], action_b] \
+                                                              + self.alpha * td
             self.memory_td.assign(idx_memory.buffer[i], td)
         batch_memory.clear()
         idx_memory.clear()
@@ -505,6 +561,10 @@ class Q_Learning():
                     self.store_proposed3(t_seq)
                     if self.memory_b.len() >= self.memory_size:
                         self.learning_proposed3()
+                elif self.mode == 8: # proposed
+                    self.store_proposed3(t_seq)
+                    if self.memory_b.len() >= self.memory_size:
+                        self.learning_proposed4()
                 else:
                     print("mode error")
                     sys.exit()
@@ -512,7 +572,7 @@ class Q_Learning():
                 state = next_state
                 self.q_func = copy.deepcopy(self.q_func_t)
 
-            if self.mode in [2,4,5,6,7]:  # PER
+            if self.mode in [2,4,5,6,7,8]:  # PER
                 self.memory_td.update_TDerror(self.memory_b, self.gamma, self.q_func, self.q_func_t)
 
             self.sum_reward_mem[i_episode] = self.sum_reward_mem[i_episode] + sum_reward
@@ -520,6 +580,10 @@ class Q_Learning():
             self.sequence_id += 1
             #self.plot_q(self.q_func)
             #self.anneal_epsilon()
+
+            #self.anneal_beta()
+            if self.mode == 7 or self.mode == 8:
+                self.anneal_atb_len(self.memory_td.max())
         self.plot_q(self.q_func)
 
     def experiment(self):
@@ -528,6 +592,7 @@ class Q_Learning():
             self.episode()
             self.reset()
         self.plot_result(self.sum_reward_mem / self.num_ex)
+
     def reset(self):
         self.q_func_t = np.zeros(shape=(self.shapexy, self.shapexy, 5))
         self.q_func = np.zeros(shape=(self.shapexy, self.shapexy, 5))
@@ -538,7 +603,6 @@ class Q_Learning():
             self.memory_state.clear()
         if self.mode == 6:
             self.memory_t.clear()
-
 
     def make_virtual_sequence(self):
         self.memory_v.clear()
@@ -621,14 +685,13 @@ class Q_Learning():
         #print(self.memory_v.len())
         print(self.goal_num)
         self.goal_num = 0
+
     def plot_result(self, result):
         plt.plot(result, label=self.mode)
 
 
-
-
 if __name__ == '__main__':
-    for i in [1,2,7]:
+    for i in [1,2,7,8]:
         q_learning = Q_Learning(mode=i)
         q_learning.experiment()
     plt.legend()
