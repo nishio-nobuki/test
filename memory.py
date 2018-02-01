@@ -69,6 +69,9 @@ class MemoryTDerror(Memory):
 
         return sum_absolute_TDerror
 
+    def anneal_per_alpha_mem(self,num):
+        self.alpha = num
+
 
 class StateMemory():
     def __init__(self, x, y):
