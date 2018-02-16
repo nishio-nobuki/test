@@ -41,7 +41,7 @@ class Grid_World():
         next_state = self.action2state(action,self.state)
 
         #random movement
-        if random.random() < 0:
+        if random.random() < 0.2:
             tmp = self.action2state(random.randint(0, 3), next_state)
             if not(-1 in tmp or self.shapexy in tmp):
                 next_state = tmp

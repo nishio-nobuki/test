@@ -82,8 +82,8 @@ class Q_Learning():
         self.per_alpha_start = 0.6
         self.per_alpha = self.per_alpha_start
         self.reward_def = [-10, -100, 100, 10]  # 何もない時、壁に当たった時、ゴール1、ゴール2
-        self.num_episodes = 500
-        self.num_ex = 100
+        self.num_episodes = 1000
+        self.num_ex = 30
         self.eps_start = 0.1
         self.eps = self.eps_start + 0.01
         self.tau = 2.0
