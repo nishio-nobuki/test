@@ -9,6 +9,7 @@ Created on Fri Aug 18 17:33:23 2017
 # Importing the libraries
 
 import sys
+import time
 import numpy as np
 import random
 import copy
@@ -23,7 +24,8 @@ Transition = namedtuple('Transition', ('state', 'action', 'reward', 'next_state'
 
 class Q_Learning():
     def __init__(self, mode, un=[5]*25000):
-        self.mode = mode
+        self.modeall = mode
+        self.mode = 0 #default
         '''
         self.world = np.array(
             [[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
@@ -77,13 +79,14 @@ class Q_Learning():
              ])
         self.goal = [[1, 1], [12, 12]]
         self.shapexy = 15
+        self.count = 0
         self.gamma = 0.9
         self.alpha = 0.1
         self.per_alpha_start = 0.6
         self.per_alpha = self.per_alpha_start
         self.reward_def = [-10, -100, 100, 10]  # 何もない時、壁に当たった時、ゴール1、ゴール2
-        self.num_episodes = 1000
-        self.num_ex = 30
+        self.num_episodes = 20000
+        self.num_ex = 2
         self.eps_start = 0.1
         self.eps = self.eps_start + 0.01
         self.tau = 2.0
@@ -93,7 +96,7 @@ class Q_Learning():
         self.beta_start = 1.0
         self.beta = self.beta_start
         self.atb_p = 0
-        self.atb_len = 1.0
+        self.atb_len = 1 #1
         if self.mode == 3:
             self.memory_size_b = 250
             self.memory_size_t = 50
@@ -117,6 +120,8 @@ class Q_Learning():
             self.memory_t = Memory(max_size=self.memory_size_t)
         self.env = Grid_World(self.world, self.goal, self.reward_def, self.shapexy)
         self.sum_reward_mem = np.zeros(self.num_episodes)
+        self.mem_avr_td = np.zeros(self.num_episodes)
+        self.mem_max_td = np.zeros(self.num_episodes)
         self.memory_b = Memory(max_size=self.memory_size)
         self.memory_td = MemoryTDerror(max_size=self.memory_size,alpha=self.per_alpha)
         self.threshold_reward = 10
@@ -127,8 +132,9 @@ class Q_Learning():
         self.ave_update_num = 0
         self.update_num_list = np.zeros(self.num_episodes*50)
         self.i_episode = 0
-        #self.un = un
+        self.un = self.update_num_list
         self.t = 0
+        self.goal_and_end = 0
 
     def select_action(self, state):
         sample = random.random()
@@ -253,15 +259,15 @@ class Q_Learning():
     def learning_per(self):
         # 0からTD誤差の絶対値和までの一様乱数を作成(昇順にしておく)
         sum_absolute_TDerror = self.memory_td.get_sum_absolute_TDerror()
-        generatedrand_list = np.random.uniform(0, sum_absolute_TDerror, self.batch_size_per)
-        #generatedrand_list = np.random.uniform(0, sum_absolute_TDerror, self.un[self.i_episode*50+self.t])
+        #generatedrand_list = np.random.uniform(0, sum_absolute_TDerror, self.batch_size_per)
+        generatedrand_list = np.random.uniform(0, sum_absolute_TDerror, self.un[self.i_episode*50+self.t])
         generatedrand_list = np.sort(generatedrand_list)
 
         # [※p2]作成した乱数で串刺しにして、バッチを作成する
-        batch_memory = Memory(max_size=self.batch_size_per)
-        idx_memory = Memory(max_size=self.batch_size_per)
-        #batch_memory = Memory(max_size=self.un[self.i_episode*50+self.t])
-        #idx_memory = Memory(max_size=self.un[self.i_episode*50+self.t])
+        #batch_memory = Memory(max_size=self.batch_size_per)
+        #idx_memory = Memory(max_size=self.batch_size_per)
+        batch_memory = Memory(max_size=self.un[self.i_episode*50+self.t])
+        idx_memory = Memory(max_size=self.un[self.i_episode*50+self.t])
         idx = 0
         tmp_sum_absolute_TDerror = 0
         for (i, randnum) in enumerate(generatedrand_list):
@@ -440,6 +446,7 @@ class Q_Learning():
             abstd = 0
             while tmp_sum_absolute_TDerror < randnum:
                 abstd = self.memory_td.buffer[idx]
+                #abstd = abs(self.memory_td.buffer[idx])
                 tmp_sum_absolute_TDerror += abs(abstd) ** self.per_alpha + 0.0001
                 idx += 1
             id = idx
@@ -565,7 +572,9 @@ class Q_Learning():
         if self.mode == 3:
             self.memory_state.clear()
 
-        for self.i_episode in tqdm(range(self.num_episodes)):
+        self.count = 0
+
+        for self.i_episode in range(self.num_episodes):
             # Initialize the Grid_World and state
             state, reward, done = self.env.reset_env()
 
@@ -642,6 +651,8 @@ class Q_Learning():
                 self.memory_td.update_TDerror(self.memory_b, self.gamma, self.q_func, self.q_func_t)
 
             self.sum_reward_mem[self.i_episode] = self.sum_reward_mem[self.i_episode] + sum_reward
+            self.mem_max_td[self.i_episode] = self.memory_td.max()
+            self.mem_avr_td[self.i_episode] = (self.memory_td.get_sum_absolute_TDerror() / self.memory_size)
 
             self.sequence_id += 1
             #self.plot_q(self.q_func)
@@ -651,17 +662,59 @@ class Q_Learning():
             #self.anneal_beta()
             if self.mode in [7,8]:
                 self.anneal_atb_len(self.memory_td.max())
+
+            #mode break
+
+            if self.goal_and_end == 1:
+                if sum_reward > 1250:
+                    self.count += 1
+                    if self.count >= 10:
+                        break
+                else:
+                    self.count = 0
+
+
         self.plot_q(self.q_func)
         self.ave_update_num += self.update_num / self.num_ex
         self.update_num = 0
 
     def experiment(self):
-        self.sum_reward_mem = np.zeros(self.num_episodes)
-        for ep_num in range(self.num_ex):
-            self.episode()
-            self.reset()
-        self.plot_result(self.sum_reward_mem / self.num_ex)
-        #return [int(round(x/self.num_ex)) for x in self.update_num_list]
+        elapsed_time = []
+        for self.mode in self.modeall:
+            self.sum_reward_mem = np.zeros(self.num_episodes)
+            for ep_num in tqdm(range(self.num_ex)):
+                start = time.time() 
+                self.episode()
+                self.reset()
+                elapsed_time.append(time.time() - start)
+                print(elapsed_time[-1])
+            print(self.ave_update_num)
+
+            #return [int(round(x/self.num_ex)) for x in self.update_num_list]
+            self.un = [int(round(x / self.num_ex)) for x in self.update_num_list]
+
+            plt.subplot(2, 2, 1)
+            self.plot_result(self.sum_reward_mem / self.num_ex)
+            #plt.legend()
+            plt.title(r"sum of reward")
+
+        plt.subplot(2, 2, 2)
+        self.plot_result(self.un)
+        #plt.legend()
+        plt.title(r"update num")
+
+        plt.subplot(2, 2, 3)
+        self.plot_result(self.mem_avr_td)
+        #plt.legend()
+        plt.title(r"max")
+
+        plt.subplot(2, 2, 4)
+        self.plot_result(self.mem_max_td)
+        #plt.legend()
+        plt.title(r"avr")
+        plt.show()
+
+        print(sum(elapsed_time)/self.num_ex)
     def reset(self):
         self.q_func_t = np.zeros(shape=(self.shapexy, self.shapexy, 5))
         self.q_func = np.zeros(shape=(self.shapexy, self.shapexy, 5))
@@ -674,7 +727,7 @@ class Q_Learning():
             self.memory_t.clear()
         if self.mode in [7,8,9]:
             self.atb_p = 0
-            self.atb_len = 1.0
+            self.atb_len = 1
         if self.mode in [2,7,8,9]:
             self.per_alpha = self.per_alpha_start
 
@@ -759,7 +812,6 @@ class Q_Learning():
         #print(self.memory_v.len())
         print(self.update_num)
 
-
     def plot_result(self, result):
         if self.mode == 0:  # normal
             label = 'Q Learning'
@@ -789,17 +841,18 @@ class Q_Learning():
         print(self.ave_update_num)
 
 
+
 if __name__ == '__main__':
     #tmp = [5]*25000
-    for i in [1,2,7]:
-        q_learning = Q_Learning(mode=i)
-        #tmp = q_learning.experiment()
-        q_learning.experiment()
-        #print(tmp)
+    modeall = [7]
+    q_learning = Q_Learning(mode=modeall)
+    #tmp = q_learning.experiment()
+    q_learning.experiment()
+    #print(tmp)
 
 
 
 
 
-    plt.legend()
-    plt.show()
+    #plt.legend()
+    #plt.show()
